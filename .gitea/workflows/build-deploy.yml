@@ -10,7 +10,7 @@ jobs:
   build-and-verify:
     runs-on: ubuntu-latest
     env:
-      REGISTRY_HOST: 10.0.0.2:5000
+      REGISTRY_HOST: localhost:5000
       IMAGE_NAME: snap_goblin
       LOCAL_IMAGE: snap_goblin:ci
     steps:
@@ -65,11 +65,10 @@ jobs:
           echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Push Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.REGISTRY_USERNAME != '' && secrets.REGISTRY_PASSWORD != ''
         run: |
           IMAGE_TAG="${GITHUB_SHA::12}"
-          docker buildx build \
-            --tag "$REGISTRY_HOST/$IMAGE_NAME:latest" \
-            --tag "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG" \
-            --output "type=image,push=true,registry.insecure=true" \
-            .
+          docker tag "$LOCAL_IMAGE" "$REGISTRY_HOST/$IMAGE_NAME:latest"
+          docker tag "$LOCAL_IMAGE" "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
+          docker push "$REGISTRY_HOST/$IMAGE_NAME:latest"
+          docker push "$REGISTRY_HOST/$IMAGE_NAME:$IMAGE_TAG"
