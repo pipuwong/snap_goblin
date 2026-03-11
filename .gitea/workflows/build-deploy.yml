@@ -35,11 +35,12 @@ jobs:
         env:
           SNAPFORGE_API_KEY: test-key
         run: |
-          docker run -d --rm --name screenshot-service-smoke -p 4000:4000 -e SNAPFORGE_API_KEY="$SNAPFORGE_API_KEY" screenshot-service-export:ci
+          docker run -d --rm --name screenshot-service-smoke -e SNAPFORGE_API_KEY="$SNAPFORGE_API_KEY" screenshot-service-export:ci
           trap 'docker logs screenshot-service-smoke || true; docker stop screenshot-service-smoke || true' EXIT
 
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl --fail --silent http://127.0.0.1:4000/health; then
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+            if docker exec screenshot-service-smoke node -e "fetch('http://127.0.0.1:4000/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"; then
+              echo "Container health endpoint is reachable."
               exit 0
             fi
             sleep 2

@@ -1,5 +1,6 @@
 export type ImageFormat = "png" | "jpeg";
 export type NavigationWaitUntil = "domcontentloaded" | "load" | "networkidle";
+export type ScrapeExportFormat = "default" | "serper";
 
 export interface CaptureRequestPayload {
   url: string;
@@ -52,6 +53,9 @@ export interface ScrapeRequestPayload extends CaptureRequestPayload {
   maxTextLength?: number;
   maxHtmlLength?: number;
   maxLinks?: number;
+  exportFormat?: ScrapeExportFormat;
+  query?: string;
+  engine?: string;
 }
 
 export interface ScrapeLink {
@@ -59,6 +63,7 @@ export interface ScrapeLink {
   text: string;
   rel: string | null;
   target: string | null;
+  title: string | null;
 }
 
 export interface ScrapedPageMeta {
@@ -68,6 +73,8 @@ export interface ScrapedPageMeta {
   description: string | null;
   ogTitle: string | null;
   ogDescription: string | null;
+  ogImage: string | null;
+  siteName: string | null;
   canonicalUrl: string | null;
   lang: string | null;
 }
@@ -127,9 +134,10 @@ export interface ScrapeRequestOptions {
   maxTextLength: number;
   maxHtmlLength: number;
   maxLinks: number;
+  exportFormat: ScrapeExportFormat;
 }
 
-export interface ScrapeResponse {
+export interface DefaultScrapeResponse {
   key: string;
   sourceUrl: string;
   cached: boolean;
@@ -143,3 +151,53 @@ export interface ScrapeResponse {
   screenshot: (ScrapeScreenshotRef & { imageUrl: string }) | null;
   timings: ScrapeTimings | null;
 }
+
+export interface SerperSearchParameters {
+  q: string;
+  type: string;
+  engine: string;
+}
+
+export interface SerperKnowledgeGraph {
+  title?: string;
+  imageUrl?: string;
+  description?: string;
+  descriptionSource?: string;
+  descriptionLink?: string;
+  attributes?: Record<string, string>;
+}
+
+export interface SerperSitelink {
+  title: string;
+  link: string;
+}
+
+export interface SerperOrganicResult {
+  title: string;
+  link: string;
+  snippet?: string;
+  sitelinks?: SerperSitelink[];
+  position: number;
+}
+
+export interface SerperPeopleAlsoAskItem {
+  question: string;
+  snippet: string;
+  title?: string;
+  link?: string;
+}
+
+export interface SerperRelatedSearchItem {
+  query: string;
+}
+
+export interface SerperScrapeResponse {
+  searchParameters: SerperSearchParameters;
+  knowledgeGraph?: SerperKnowledgeGraph;
+  organic: SerperOrganicResult[];
+  peopleAlsoAsk?: SerperPeopleAlsoAskItem[];
+  relatedSearches?: SerperRelatedSearchItem[];
+  credits: number;
+}
+
+export type ScrapeResponse = DefaultScrapeResponse | SerperScrapeResponse;

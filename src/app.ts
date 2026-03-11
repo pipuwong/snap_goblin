@@ -8,6 +8,11 @@ import type {
   CapturedImageResult,
   ImageFormat,
   NavigationWaitUntil,
+  ScrapeExportFormat,
+  SerperKnowledgeGraph,
+  SerperOrganicResult,
+  SerperPeopleAlsoAskItem,
+  SerperRelatedSearchItem,
   ScrapeRequestOptions,
   ScrapeRequestPayload,
   ScrapeResponse,
@@ -24,9 +29,11 @@ import {
 } from "./url-policy.js";
 
 const VALID_FORMATS = new Set<ImageFormat>(["png", "jpeg"]);
+const VALID_EXPORT_FORMATS = new Set<ScrapeExportFormat>(["default", "serper"]);
 const DEFAULT_FORMAT: ImageFormat = "png";
 const DEFAULT_QUALITY = 80;
 const DEFAULT_WAIT_UNTIL: NavigationWaitUntil = "networkidle";
+const DEFAULT_EXPORT_FORMAT: ScrapeExportFormat = "default";
 const MAX_EXTRA_WAIT_MS = 30_000;
 
 function parseFormat(value: unknown): ImageFormat {
@@ -43,6 +50,14 @@ function parseQuality(value: unknown): number {
   }
 
   return Math.min(100, Math.max(0, Math.floor(value)));
+}
+
+function parseExportFormat(value: unknown): ScrapeExportFormat {
+  if (typeof value === "string" && VALID_EXPORT_FORMATS.has(value as ScrapeExportFormat)) {
+    return value as ScrapeExportFormat;
+  }
+
+  return DEFAULT_EXPORT_FORMAT;
 }
 
 function parseBoolean(value: unknown, fallback: boolean): boolean {
@@ -145,6 +160,215 @@ function buildAbsoluteImageUrl(request: Request, pathName: string): string {
   return `${proto}://${host}${pathName}`;
 }
 
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function trimSnippet(value: string | null | undefined, maxLength = 240): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = normalizeWhitespace(value);
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength).trimEnd()}...`;
+}
+
+function getHostname(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+function buildPageSnippet(result: ScrapedPageResult): string | undefined {
+  return (
+    trimSnippet(result.page?.ogDescription) ??
+    trimSnippet(result.page?.description) ??
+    trimSnippet(result.content?.text)
+  );
+}
+
+function buildKnowledgeGraph(
+  result: ScrapedPageResult,
+  sourceUrl: string
+): SerperKnowledgeGraph | undefined {
+  const title = result.page?.ogTitle ?? result.page?.title ?? getHostname(sourceUrl) ?? undefined;
+  const description = buildPageSnippet(result);
+  const descriptionLink = result.page?.canonicalUrl ?? result.page?.finalUrl ?? sourceUrl;
+
+  const attributes = Object.fromEntries(
+    Object.entries({
+      URL: result.page?.finalUrl ?? sourceUrl,
+      "Canonical URL": result.page?.canonicalUrl ?? undefined,
+      Website: result.page?.siteName ?? undefined,
+      Language: result.page?.lang ?? undefined
+    }).filter((entry): entry is [string, string] => Boolean(entry[1]))
+  );
+
+  if (!title && !description && !result.page?.ogImage && Object.keys(attributes).length === 0) {
+    return undefined;
+  }
+
+  return {
+    ...(title ? { title } : {}),
+    ...(result.page?.ogImage ? { imageUrl: result.page.ogImage } : {}),
+    ...(description ? { description } : {}),
+    ...(Object.keys(attributes).length > 0 ? { attributes } : {}),
+    ...(description ? { descriptionSource: result.page?.siteName ?? "Website" } : {}),
+    ...(description ? { descriptionLink } : {})
+  };
+}
+
+function buildOrganicResults(
+  result: ScrapedPageResult,
+  sourceUrl: string
+): SerperOrganicResult[] {
+  const finalUrl = result.page?.finalUrl ?? sourceUrl;
+  const pageHost = getHostname(finalUrl);
+  const usedLinks = new Set<string>();
+  const sitelinks =
+    result.links
+      ?.filter((link) => link.href !== finalUrl)
+      .filter((link) => link.text || link.title)
+      .filter((link) => getHostname(link.href) === pageHost)
+      .filter((link) => {
+        if (usedLinks.has(link.href)) {
+          return false;
+        }
+
+        usedLinks.add(link.href);
+        return true;
+      })
+      .slice(0, 5)
+      .map((link) => ({
+        title: link.text || link.title || getHostname(link.href) || link.href,
+        link: link.href
+      })) ?? [];
+
+  const organic: SerperOrganicResult[] = [];
+  const primaryTitle = result.page?.title ?? result.page?.ogTitle ?? getHostname(finalUrl) ?? finalUrl;
+  organic.push({
+    title: primaryTitle,
+    link: finalUrl,
+    ...(buildPageSnippet(result) ? { snippet: buildPageSnippet(result) } : {}),
+    ...(sitelinks.length > 0 ? { sitelinks } : {}),
+    position: 1
+  });
+
+  const seen = new Set<string>([finalUrl, ...sitelinks.map((link) => link.link)]);
+  for (const link of result.links ?? []) {
+    if (seen.has(link.href)) {
+      continue;
+    }
+
+    const title = link.text || link.title || getHostname(link.href) || link.href;
+    if (!title) {
+      continue;
+    }
+
+    seen.add(link.href);
+    organic.push({
+      title,
+      link: link.href,
+      ...(trimSnippet(link.title) ? { snippet: trimSnippet(link.title) } : {}),
+      position: organic.length + 1
+    });
+
+    if (organic.length >= 10) {
+      break;
+    }
+  }
+
+  return organic;
+}
+
+function buildPeopleAlsoAsk(
+  result: ScrapedPageResult,
+  sourceUrl: string
+): SerperPeopleAlsoAskItem[] {
+  const title = result.page?.title ?? result.page?.ogTitle ?? undefined;
+  const link = result.page?.finalUrl ?? sourceUrl;
+  const lines = (result.content?.text ?? "")
+    .split(/\n+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const items: SerperPeopleAlsoAskItem[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const question = lines[index];
+    if (!/\?$/.test(question) || question.length < 8 || question.length > 180) {
+      continue;
+    }
+
+    const answer = lines.slice(index + 1).find((value) => !/\?$/.test(value) && value.length > 20);
+    const normalizedQuestion = normalizeWhitespace(question).toLowerCase();
+    if (!answer || seen.has(normalizedQuestion)) {
+      continue;
+    }
+
+    seen.add(normalizedQuestion);
+    items.push({
+      question: normalizeWhitespace(question),
+      snippet: trimSnippet(answer, 220) ?? normalizeWhitespace(answer),
+      ...(title ? { title } : {}),
+      ...(link ? { link } : {})
+    });
+
+    if (items.length >= 8) {
+      break;
+    }
+  }
+
+  return items;
+}
+
+function buildRelatedSearches(
+  result: ScrapedPageResult
+): SerperRelatedSearchItem[] {
+  const pageTitle = normalizeWhitespace(result.page?.title ?? result.page?.ogTitle ?? "").toLowerCase();
+  const candidates = [
+    ...(result.content?.headings ?? []),
+    ...((result.links ?? []).map((link) => link.text || link.title || "").filter(Boolean) as string[])
+  ];
+  const seen = new Set<string>();
+  const queries: SerperRelatedSearchItem[] = [];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeWhitespace(candidate);
+    const key = normalized.toLowerCase();
+    if (
+      normalized.length < 3 ||
+      normalized.length > 80 ||
+      key === pageTitle ||
+      /\?$/.test(normalized) ||
+      seen.has(key)
+    ) {
+      continue;
+    }
+
+    seen.add(key);
+    queries.push({ query: normalized });
+
+    if (queries.length >= 8) {
+      break;
+    }
+  }
+
+  return queries;
+}
+
 function toCaptureResponse(options: {
   key: string;
   sourceUrl: string;
@@ -177,9 +401,35 @@ function toScrapeResponse(options: {
   capturedAtMs: number;
   ttlSeconds: number;
   requestOptions: ScrapeRequestOptions;
+  query: string | null;
+  engine: string;
   result: ScrapedPageResult;
   request: Request;
 }): ScrapeResponse {
+  if (options.requestOptions.exportFormat === "serper") {
+    const knowledgeGraph = buildKnowledgeGraph(options.result, options.sourceUrl);
+    const organic = buildOrganicResults(options.result, options.sourceUrl);
+    const peopleAlsoAsk = buildPeopleAlsoAsk(options.result, options.sourceUrl);
+    const relatedSearches = buildRelatedSearches(options.result);
+
+    return {
+      searchParameters: {
+        q:
+          options.query ??
+          options.result.page?.title ??
+          options.result.page?.ogTitle ??
+          options.sourceUrl,
+        type: "webpage",
+        engine: options.engine
+      },
+      ...(knowledgeGraph ? { knowledgeGraph } : {}),
+      organic,
+      ...(peopleAlsoAsk.length > 0 ? { peopleAlsoAsk } : {}),
+      ...(relatedSearches.length > 0 ? { relatedSearches } : {}),
+      credits: 1
+    };
+  }
+
   const expiresAtMs = options.capturedAtMs + options.ttlSeconds * 1000;
 
   return {
@@ -275,8 +525,11 @@ function parseScrapeInput(
 ): {
   options: ScrapeRequestOptions;
   ttlSeconds: number;
+  query: string | null;
+  engine: string;
 } {
   const captureInput = parseCaptureInput(body, config);
+  const exportFormat = parseExportFormat(body?.exportFormat);
   const options: ScrapeRequestOptions = {
     width: captureInput.width,
     height: captureInput.height,
@@ -288,17 +541,20 @@ function parseScrapeInput(
     extraWaitMs: parseExtraWaitMs(body?.extraWaitMs),
     includeContent: parseBoolean(body?.includeContent, true),
     includeMetadata: parseBoolean(body?.includeMetadata, true),
-    includeLinks: parseBoolean(body?.includeLinks, false),
+    includeLinks: parseBoolean(body?.includeLinks, exportFormat === "serper"),
     includeHtml: parseBoolean(body?.includeHtml, false),
     includeScreenshot: parseBoolean(body?.includeScreenshot, false),
     maxTextLength: parseBoundedInt(body?.maxTextLength, config.maxTextLength, config.maxTextLength),
     maxHtmlLength: parseBoundedInt(body?.maxHtmlLength, config.maxHtmlLength, config.maxHtmlLength),
-    maxLinks: parseBoundedInt(body?.maxLinks, config.maxLinks, config.maxLinks)
+    maxLinks: parseBoundedInt(body?.maxLinks, config.maxLinks, config.maxLinks),
+    exportFormat
   };
 
   return {
     options,
-    ttlSeconds: parseTtl(body?.ttlOverrideSeconds, config.scrapeCacheTtlSeconds)
+    ttlSeconds: parseTtl(body?.ttlOverrideSeconds, config.scrapeCacheTtlSeconds),
+    query: parseOptionalString(body?.query),
+    engine: parseOptionalString(body?.engine) ?? "playwright"
   };
 }
 
@@ -504,6 +760,8 @@ export function createApp(options: CreateAppOptions) {
             capturedAtMs: existing.meta.capturedAt,
             ttlSeconds: parsed.ttlSeconds,
             requestOptions: parsed.options,
+            query: parsed.query,
+            engine: parsed.engine,
             result: existing.payload,
             request
           })
@@ -584,6 +842,8 @@ export function createApp(options: CreateAppOptions) {
           capturedAtMs: saved.capturedAt,
           ttlSeconds: parsed.ttlSeconds,
           requestOptions: parsed.options,
+          query: parsed.query,
+          engine: parsed.engine,
           result: scrapeResult,
           request
         })

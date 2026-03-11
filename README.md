@@ -120,6 +120,9 @@ Request fields:
 - `includeHtml` default `false`
 - `includeScreenshot` default `false`
 - `maxTextLength`, `maxHtmlLength`, `maxLinks` optional bounded overrides
+- `exportFormat` optional: `default` or `serper`
+- `query` optional source query used in Serper-style exports
+- `engine` optional engine label for Serper-style exports, default `playwright`
 
 JSON-only example:
 
@@ -148,6 +151,20 @@ Combined scrape + screenshot example:
   "height": 900,
   "waitUntil": "networkidle",
   "waitForSelector": "article"
+}
+```
+
+Serper-style export example:
+
+```json
+{
+  "url": "https://www.apple.com",
+  "exportFormat": "serper",
+  "query": "apple inc",
+  "engine": "google",
+  "includeContent": true,
+  "includeMetadata": true,
+  "includeLinks": true
 }
 ```
 
@@ -215,6 +232,51 @@ Example response:
     "extractionMs": 138,
     "totalMs": 1191
   }
+}
+```
+
+When `exportFormat` is set to `serper`, `/scrape` returns a Serper-inspired response shape:
+
+```json
+{
+  "searchParameters": {
+    "q": "apple inc",
+    "type": "webpage",
+    "engine": "google"
+  },
+  "knowledgeGraph": {
+    "title": "Apple",
+    "imageUrl": "https://www.apple.com/example-og-image.jpg",
+    "description": "Apple Inc. is an American multinational technology company...",
+    "descriptionSource": "Apple",
+    "descriptionLink": "https://www.apple.com/",
+    "attributes": {
+      "URL": "https://www.apple.com/",
+      "Canonical URL": "https://www.apple.com/",
+      "Website": "Apple",
+      "Language": "en"
+    }
+  },
+  "organic": [
+    {
+      "title": "Apple",
+      "link": "https://www.apple.com/",
+      "snippet": "Apple Inc. is an American multinational technology company...",
+      "sitelinks": [
+        {
+          "title": "Store",
+          "link": "https://www.apple.com/store"
+        }
+      ],
+      "position": 1
+    }
+  ],
+  "relatedSearches": [
+    {
+      "query": "Mac"
+    }
+  ],
+  "credits": 1
 }
 ```
 

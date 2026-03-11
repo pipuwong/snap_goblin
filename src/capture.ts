@@ -234,7 +234,8 @@ export async function scrapeWebsite(options: {
                   href: element.href,
                   text: element.textContent?.replace(/\s+/g, " ").trim() ?? "",
                   rel: element.getAttribute("rel"),
-                  target: element.getAttribute("target")
+                  target: element.getAttribute("target"),
+                  title: element.getAttribute("title")?.trim() || null
                 }))
                 .filter((link) => Boolean(link.href))
                 .slice(0, maxLinks)
@@ -248,6 +249,10 @@ export async function scrapeWebsite(options: {
             ogDescription: includeMetadata
               ? getMeta('meta[property="og:description"]')
               : null,
+            ogImage: includeMetadata
+              ? getMeta('meta[property="og:image"]') ?? getMeta('meta[name="twitter:image"]')
+              : null,
+            siteName: includeMetadata ? getMeta('meta[property="og:site_name"]') : null,
             canonicalUrl: includeMetadata ? canonicalElement?.href ?? null : null,
             lang: includeMetadata ? document.documentElement.lang || null : null,
             headings,
@@ -272,6 +277,8 @@ export async function scrapeWebsite(options: {
               description: extracted.description,
               ogTitle: extracted.ogTitle,
               ogDescription: extracted.ogDescription,
+              ogImage: extracted.ogImage,
+              siteName: extracted.siteName,
               canonicalUrl: extracted.canonicalUrl,
               lang: extracted.lang
             }
