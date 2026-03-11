@@ -30,7 +30,7 @@ Playwright-powered internal API for screenshots and rendered page scraping. It i
 - `NAVIGATION_TIMEOUT_MS` default `15000`
 - `MAX_VIEWPORT_WIDTH` default `1920`
 - `MAX_VIEWPORT_HEIGHT` default `1080`
-- `MAX_TEXT_LENGTH` default `20000`
+- `MAX_TEXT_LENGTH` default `100000`
 - `MAX_HTML_LENGTH` default `100000`
 - `MAX_LINKS` default `100`
 - `MAX_CONCURRENT_PAGES` default `2`
@@ -59,7 +59,7 @@ SCRAPE_CACHE_TTL_SECONDS=300
 NAVIGATION_TIMEOUT_MS=15000
 MAX_VIEWPORT_WIDTH=1920
 MAX_VIEWPORT_HEIGHT=1080
-MAX_TEXT_LENGTH=20000
+MAX_TEXT_LENGTH=100000
 MAX_HTML_LENGTH=100000
 MAX_LINKS=100
 MAX_CONCURRENT_PAGES=2
@@ -129,7 +129,7 @@ JSON-only example:
   "includeContent": true,
   "includeMetadata": true,
   "includeLinks": true,
-  "maxTextLength": 8000,
+  "maxTextLength": 25000,
   "maxLinks": 25
 }
 ```
@@ -175,7 +175,7 @@ Example response:
     "includeLinks": true,
     "includeHtml": false,
     "includeScreenshot": true,
-    "maxTextLength": 8000,
+    "maxTextLength": 25000,
     "maxHtmlLength": 100000,
     "maxLinks": 25
   },
@@ -239,7 +239,7 @@ const response = await fetch("http://scraper:4000/scrape", {
     includeMetadata: true,
     includeLinks: true,
     includeScreenshot: false,
-    maxTextLength: 8000
+    maxTextLength: 25000
   }),
   cache: "no-store"
 });
