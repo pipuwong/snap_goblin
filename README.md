@@ -21,7 +21,7 @@ Playwright-powered internal API for screenshots and rendered page scraping. It i
 
 ## Environment variables
 
-- `SNAPFORGE_API_KEY` required shared API key
+- `SNAP_GOBLIN_API_KEY` required shared API key
 - `PORT` default `4000`
 - `CACHE_DIR` default `/app/cache`
 - `SCRAPE_CACHE_DIR` default `/app/cache/scrape`
@@ -50,7 +50,7 @@ docker run --rm -p 4000:4000 --env-file .env website-scraper-api
 Example `.env`:
 
 ```env
-SNAPFORGE_API_KEY=replace-with-strong-api-key
+SNAP_GOBLIN_API_KEY=replace-with-strong-api-key
 PORT=4000
 CACHE_DIR=/app/cache
 SCRAPE_CACHE_DIR=/app/cache/scrape

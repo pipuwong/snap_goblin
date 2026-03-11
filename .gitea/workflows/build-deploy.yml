@@ -40,9 +40,9 @@ jobs:
 
       - name: Smoke test container health endpoint
         env:
-          SNAPFORGE_API_KEY: test-key
+          SNAP_GOBLIN_API_KEY: test-key
         run: |
-          docker run -d --rm --name snap-goblin-smoke -e SNAPFORGE_API_KEY="$SNAPFORGE_API_KEY" "$LOCAL_IMAGE"
+          docker run -d --rm --name snap-goblin-smoke -e SNAP_GOBLIN_API_KEY="$SNAP_GOBLIN_API_KEY" "$LOCAL_IMAGE"
           trap 'docker logs snap-goblin-smoke || true; docker stop snap-goblin-smoke || true' EXIT
 
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -55,14 +55,6 @@ jobs:
 
           echo "Container failed health check."
           exit 1
-
-      - name: Login to Docker registry
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.REGISTRY_USERNAME != '' && secrets.REGISTRY_PASSWORD != ''
-        env:
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-        run: |
-          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Push Docker image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

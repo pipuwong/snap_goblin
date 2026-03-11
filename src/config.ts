@@ -73,9 +73,9 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig {
-  const apiKey = env.SNAPFORGE_API_KEY;
+  const apiKey = env.SNAP_GOBLIN_API_KEY;
   if (!apiKey) {
-    throw new Error("SNAPFORGE_API_KEY is required.");
+    throw new Error("SNAP_GOBLIN_API_KEY is required.");
   }
 
   const cacheDir = env.CACHE_DIR

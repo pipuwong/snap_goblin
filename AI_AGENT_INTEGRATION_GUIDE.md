@@ -52,13 +52,13 @@ The consuming app should have these env vars:
 
 ```env
 SCRAPER_BASE_URL=http://localhost:4010
-SCRAPER_API_KEY=replace-with-the-same-value-as-SNAPFORGE_API_KEY
+SCRAPER_API_KEY=replace-with-the-same-value-as-SNAP_GOBLIN_API_KEY
 ```
 
 The scraper service itself must be started with:
 
 ```env
-SNAPFORGE_API_KEY=replace-with-strong-api-key
+SNAP_GOBLIN_API_KEY=replace-with-strong-api-key
 HOST_PORT=4010
 PORT=4000
 MAX_TEXT_LENGTH=100000
