@@ -1,0 +1,49 @@
+name: Build Screenshot Service
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t screenshot-service-export:ci .
+
+      - name: Smoke test container health endpoint
+        env:
+          SNAPFORGE_API_KEY: test-key
+        run: |
+          docker run -d --rm --name screenshot-service-smoke -p 4000:4000 -e SNAPFORGE_API_KEY="$SNAPFORGE_API_KEY" screenshot-service-export:ci
+          trap 'docker logs screenshot-service-smoke || true; docker stop screenshot-service-smoke || true' EXIT
+
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl --fail --silent http://127.0.0.1:4000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Container failed health check."
+          exit 1

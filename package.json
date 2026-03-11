@@ -1,0 +1,26 @@
+{
+  "name": "screenshot-service-export",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Playwright-powered screenshot API service.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/src/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "playwright": "^1.58.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

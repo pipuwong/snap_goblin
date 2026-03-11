@@ -1,0 +1,44 @@
+services:
+  screenshot-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: screenshot-service-export:latest
+    container_name: screenshot-service-export
+    restart: unless-stopped
+    init: true
+    shm_size: 1gb
+    ports:
+      - "${HOST_PORT:-4010}:4000"
+    environment:
+      SNAPFORGE_API_KEY: ${SNAPFORGE_API_KEY:?Set SNAPFORGE_API_KEY in your .env file}
+      PORT: 4000
+      CACHE_DIR: /app/cache
+      SCRAPE_CACHE_DIR: /app/cache/scrape
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
+      SCRAPE_CACHE_TTL_SECONDS: ${SCRAPE_CACHE_TTL_SECONDS:-300}
+      NAVIGATION_TIMEOUT_MS: ${NAVIGATION_TIMEOUT_MS:-15000}
+      MAX_VIEWPORT_WIDTH: ${MAX_VIEWPORT_WIDTH:-1920}
+      MAX_VIEWPORT_HEIGHT: ${MAX_VIEWPORT_HEIGHT:-1080}
+      MAX_TEXT_LENGTH: ${MAX_TEXT_LENGTH:-20000}
+      MAX_HTML_LENGTH: ${MAX_HTML_LENGTH:-100000}
+      MAX_LINKS: ${MAX_LINKS:-100}
+      MAX_CONCURRENT_PAGES: ${MAX_CONCURRENT_PAGES:-2}
+      ALLOW_PRIVATE_NETWORKS: ${ALLOW_PRIVATE_NETWORKS:-false}
+      URL_ALLOWLIST: ${URL_ALLOWLIST:-}
+      URL_DENYLIST: ${URL_DENYLIST:-}
+    volumes:
+      - screenshot-cache:/app/cache
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4000/health').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  screenshot-cache:
