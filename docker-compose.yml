@@ -1,10 +1,10 @@
 services:
-  screenshot-service:
+  snap_goblin:
     build:
       context: .
       dockerfile: Dockerfile
-    image: screenshot-service-export:latest
-    container_name: screenshot-service-export
+    image: snap_goblin:latest
+    container_name: snap_goblin
     restart: unless-stopped
     init: true
     shm_size: 1gb
@@ -28,7 +28,7 @@ services:
       URL_ALLOWLIST: ${URL_ALLOWLIST:-}
       URL_DENYLIST: ${URL_DENYLIST:-}
     volumes:
-      - screenshot-cache:/app/cache
+      - snap_goblin_cache:/app/cache
     healthcheck:
       test:
         - CMD
@@ -41,4 +41,4 @@ services:
       start_period: 10s
 
 volumes:
-  screenshot-cache:
+  snap_goblin_cache:

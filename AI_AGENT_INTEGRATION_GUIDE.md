@@ -43,7 +43,7 @@ If the consuming app runs in another Docker container on the same network, prefe
 Example:
 
 ```txt
-http://screenshot-service:4000
+http://snap_goblin:4000
 ```
 
 ## Required Environment Variables
