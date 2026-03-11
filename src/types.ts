@@ -7,6 +7,7 @@ export interface CaptureRequestPayload {
   ttlOverrideSeconds?: number;
   width?: number;
   height?: number;
+  fetchFullPage?: boolean;
   fullPage?: boolean;
   format?: ImageFormat;
   quality?: number;

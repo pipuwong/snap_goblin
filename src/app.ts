@@ -1,4 +1,5 @@
-import express, { type Request } from "express";
+import crypto from "node:crypto";
+import express, { type NextFunction, type Request, type Response } from "express";
 import { DiskScrapeCache, DiskSnapshotCache } from "./cache.js";
 import type { RuntimeConfig } from "./config.js";
 import { captureWebsite, scrapeWebsite } from "./capture.js";
@@ -35,6 +36,13 @@ const DEFAULT_QUALITY = 80;
 const DEFAULT_WAIT_UNTIL: NavigationWaitUntil = "networkidle";
 const DEFAULT_EXPORT_FORMAT: ScrapeExportFormat = "default";
 const MAX_EXTRA_WAIT_MS = 30_000;
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+
+type RequestRateLimitScope = "auth" | "unauth";
 
 function parseFormat(value: unknown): ImageFormat {
   if (typeof value === "string" && VALID_FORMATS.has(value as ImageFormat)) {
@@ -150,14 +158,12 @@ export interface CreateAppOptions {
   scrapeFn?: ScrapeFn;
 }
 
-function buildAbsoluteImageUrl(request: Request, pathName: string): string {
-  const proto = request.header("x-forwarded-proto") ?? request.protocol;
-  const host = request.header("x-forwarded-host") ?? request.get("host");
-  if (!host) {
+function buildImageUrl(config: RuntimeConfig, pathName: string): string {
+  if (!config.publicBaseUrl) {
     return pathName;
   }
 
-  return `${proto}://${host}${pathName}`;
+  return new URL(pathName, `${config.publicBaseUrl}/`).toString();
 }
 
 function normalizeWhitespace(value: string): string {
@@ -376,7 +382,7 @@ function toCaptureResponse(options: {
   capturedAtMs: number;
   ttlSeconds: number;
   mimeType: string;
-  request: Request;
+  config: RuntimeConfig;
 }): CaptureResponse {
   const imagePath = `/image/${options.key}`;
   const expiresAtMs = options.capturedAtMs + options.ttlSeconds * 1000;
@@ -390,7 +396,7 @@ function toCaptureResponse(options: {
     ttlSeconds: options.ttlSeconds,
     mimeType: options.mimeType,
     imagePath,
-    imageUrl: buildAbsoluteImageUrl(options.request, imagePath)
+    imageUrl: buildImageUrl(options.config, imagePath)
   };
 }
 
@@ -404,7 +410,7 @@ function toScrapeResponse(options: {
   query: string | null;
   engine: string;
   result: ScrapedPageResult;
-  request: Request;
+  config: RuntimeConfig;
 }): ScrapeResponse {
   if (options.requestOptions.exportFormat === "serper") {
     const knowledgeGraph = buildKnowledgeGraph(options.result, options.sourceUrl);
@@ -446,7 +452,7 @@ function toScrapeResponse(options: {
     screenshot: options.result.screenshot
       ? {
           ...options.result.screenshot,
-          imageUrl: buildAbsoluteImageUrl(options.request, options.result.screenshot.imagePath)
+          imageUrl: buildImageUrl(options.config, options.result.screenshot.imagePath)
         }
       : null,
     timings: options.result.timings
@@ -462,9 +468,77 @@ function parseTtl(overrideTtl: unknown, fallback: number): number {
   return rounded > 0 ? rounded : fallback;
 }
 
-function isAuthorized(request: Request, apiKey: string): boolean {
+function getApiKeyCandidate(request: Request): string | null {
   const candidate = request.header("x-api-key");
-  return Boolean(candidate) && candidate === apiKey;
+  if (typeof candidate !== "string") {
+    return null;
+  }
+
+  const normalized = candidate.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function isAuthorized(request: Request, apiKey: string): boolean {
+  const candidate = getApiKeyCandidate(request);
+  if (!candidate) {
+    return false;
+  }
+
+  const expected = Buffer.from(apiKey, "utf8");
+  const received = Buffer.from(candidate, "utf8");
+  if (expected.byteLength !== received.byteLength) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expected, received);
+}
+
+function setSecurityHeaders(_request: Request, response: Response, next: NextFunction): void {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.setHeader("Cross-Origin-Resource-Policy", "same-site");
+  next();
+}
+
+function createRateLimiter(config: RuntimeConfig) {
+  const entries = new Map<string, RateLimitEntry>();
+
+  return (request: Request, response: Response, next: NextFunction): void => {
+    const now = Date.now();
+    const scope: RequestRateLimitScope = isAuthorized(request, config.apiKey) ? "auth" : "unauth";
+    const clientId = request.ip || request.socket.remoteAddress || "unknown";
+    const mapKey = `${scope}:${clientId}`;
+    const maxRequests =
+      scope === "auth" ? config.authRateLimitMax : config.unauthRateLimitMax;
+    const current = entries.get(mapKey);
+
+    if (!current || current.resetAt <= now) {
+      entries.set(mapKey, {
+        count: 1,
+        resetAt: now + config.rateLimitWindowMs
+      });
+      next();
+      return;
+    }
+
+    if (current.count >= maxRequests) {
+      const retryAfterSeconds = Math.max(
+        1,
+        Math.ceil((current.resetAt - now) / 1000)
+      );
+      response.setHeader("Retry-After", retryAfterSeconds.toString());
+      response.status(429).json({
+        error: "Too many requests. Please try again later."
+      });
+      return;
+    }
+
+    current.count += 1;
+    entries.set(mapKey, current);
+    next();
+  };
 }
 
 async function validateSourceUrl(value: string, config: RuntimeConfig): Promise<string> {
@@ -501,11 +575,12 @@ function parseCaptureInput(
     config.maxViewportHeight,
     config.maxViewportHeight
   );
+  const fullPage = parseBoolean(body?.fetchFullPage, false) || body?.fullPage === true;
 
   return {
     width,
     height,
-    fullPage: body?.fullPage === true,
+    fullPage,
     format: parseFormat(body?.format),
     quality: parseQuality(body?.quality),
     ttlSeconds: parseTtl(body?.ttlOverrideSeconds, config.cacheTtlSeconds),
@@ -609,7 +684,10 @@ export function createApp(options: CreateAppOptions) {
   const scrapeFn = options.scrapeFn ?? scrapeWebsite;
   const app = express();
 
+  app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
+  app.use(setSecurityHeaders);
+  app.use(createRateLimiter(options.config));
 
   app.get("/health", (_request, response) => {
     response.status(200).json({ ok: true });
@@ -655,7 +733,7 @@ export function createApp(options: CreateAppOptions) {
             capturedAtMs: existing.capturedAt,
             ttlSeconds: captureInput.ttlSeconds,
             mimeType: existing.contentType,
-            request
+          config: options.config
           })
         );
         return;
@@ -677,7 +755,7 @@ export function createApp(options: CreateAppOptions) {
           capturedAtMs: saved.capturedAtMs,
           ttlSeconds: captureInput.ttlSeconds,
           mimeType: saved.mimeType,
-          request
+          config: options.config
         })
       );
     } catch (error) {
@@ -713,7 +791,7 @@ export function createApp(options: CreateAppOptions) {
           capturedAtMs: saved.capturedAtMs,
           ttlSeconds: captureInput.ttlSeconds,
           mimeType: saved.mimeType,
-          request
+          config: options.config
         })
       );
     } catch (error) {
@@ -763,7 +841,7 @@ export function createApp(options: CreateAppOptions) {
             query: parsed.query,
             engine: parsed.engine,
             result: existing.payload,
-            request
+            config: options.config
           })
         );
         return;
@@ -845,7 +923,7 @@ export function createApp(options: CreateAppOptions) {
           query: parsed.query,
           engine: parsed.engine,
           result: scrapeResult,
-          request
+          config: options.config
         })
       );
     } catch (error) {

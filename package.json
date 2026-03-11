@@ -1,9 +1,25 @@
 {
   "name": "snap_goblin",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Standalone Playwright-powered screenshot API service.",
+  "description": "Self-hosted Playwright API for screenshots and rendered page scraping.",
+  "repository": {
+    "type": "git",
+    "url": "https://git.cameronlow.com/cam/SnapGoblin.git"
+  },
+  "homepage": "https://git.cameronlow.com/cam/SnapGoblin",
+  "bugs": {
+    "url": "https://git.cameronlow.com/cam/SnapGoblin/issues"
+  },
+  "keywords": [
+    "playwright",
+    "screenshot",
+    "scraper",
+    "scraping",
+    "express",
+    "automation",
+    "ai"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/server.ts",

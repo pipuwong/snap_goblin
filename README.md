@@ -1,17 +1,16 @@
-# Website Scraper API
+# Snap Goblin
 
-Playwright-powered internal API for screenshots and rendered page scraping. It is built to sit behind a shared API key and be consumed by other Next.js apps running on your VPS or inside Docker.
+Snap Goblin is a self-hosted Playwright service for rendered page scraping and screenshot capture. It is built for server-to-server use behind a shared API key, with deterministic JSON output, on-disk caching, and controls that make dynamic pages easier to handle in production.
 
-## What it does
+## Why use it
 
-- Protects scrape and screenshot routes with `x-api-key`
-- Captures screenshots via Playwright + Chromium
-- Scrapes rendered page content into deterministic JSON
-- Optionally returns both JSON content and screenshot metadata from one request
-- Caches screenshots and scrape payloads on disk by deterministic key
-- Supports dynamic pages with configurable wait controls
+- Scrape JavaScript-rendered pages with a real browser instead of raw HTTP fetches.
+- Capture screenshots and structured page data from the same service.
+- Keep responses predictable for ingestion pipelines, AI workflows, and internal tools.
+- Cache results on disk with stable keys so repeated requests stay fast.
+- Restrict target hosts and private-network access for safer deployments.
 
-## API overview
+## What it provides
 
 - `GET /health`
 - `POST /capture`
@@ -19,55 +18,74 @@ Playwright-powered internal API for screenshots and rendered page scraping. It i
 - `POST /scrape`
 - `GET /image/:key`
 
-## Environment variables
+`GET /health` is public. Every other route requires `x-api-key`, including `GET /image/:key`.
 
-- `SNAP_GOBLIN_API_KEY` required shared API key
-- `PORT` default `4000`
-- `CACHE_DIR` default `/app/cache`
-- `SCRAPE_CACHE_DIR` default `/app/cache/scrape`
-- `CACHE_TTL_SECONDS` default `300`
-- `SCRAPE_CACHE_TTL_SECONDS` default `300`
-- `NAVIGATION_TIMEOUT_MS` default `15000`
-- `MAX_VIEWPORT_WIDTH` default `1920`
-- `MAX_VIEWPORT_HEIGHT` default `1080`
-- `MAX_TEXT_LENGTH` default `100000`
-- `MAX_HTML_LENGTH` default `100000`
-- `MAX_LINKS` default `100`
-- `MAX_CONCURRENT_PAGES` default `2`
-- `ALLOW_PRIVATE_NETWORKS` default `false`
-- `URL_ALLOWLIST` optional comma-separated hostname allowlist
-- `URL_DENYLIST` optional comma-separated hostname denylist
+## Quick Start
 
-`ALLOW_PRIVATE_NETWORKS=false` blocks `localhost`, loopback, and private-network targets by default. For VPS use, prefer keeping that default and setting `URL_ALLOWLIST` for the external hosts you trust.
+### Docker Compose
 
-## Run with Docker
+1. Copy `.env.example` to `.env`.
+2. Set a long random `SNAP_GOBLIN_API_KEY`.
+3. Start the service:
 
 ```bash
-docker build -t website-scraper-api .
-docker run --rm -p 4000:4000 --env-file .env website-scraper-api
+docker compose up -d --build
 ```
 
-Example `.env`:
+The default local URL is `http://localhost:4010`.
 
-```env
-SNAP_GOBLIN_API_KEY=replace-with-strong-api-key
-PORT=4000
-CACHE_DIR=/app/cache
-SCRAPE_CACHE_DIR=/app/cache/scrape
-CACHE_TTL_SECONDS=300
-SCRAPE_CACHE_TTL_SECONDS=300
-NAVIGATION_TIMEOUT_MS=15000
-MAX_VIEWPORT_WIDTH=1920
-MAX_VIEWPORT_HEIGHT=1080
-MAX_TEXT_LENGTH=100000
-MAX_HTML_LENGTH=100000
-MAX_LINKS=100
-MAX_CONCURRENT_PAGES=2
-ALLOW_PRIVATE_NETWORKS=false
-# URL_ALLOWLIST=example.com,news.ycombinator.com
+### Local Development
+
+```bash
+npm ci
+npm run dev
 ```
 
-## Endpoints
+The app listens on `PORT`, which defaults to `4000` outside Docker.
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SNAP_GOBLIN_API_KEY` | none | Required shared secret for all protected routes. |
+| `HOST_PORT` | `4010` | Host port used by `docker-compose.yml`. |
+| `PORT` | `4000` | App port inside the process or container. |
+| `CACHE_DIR` | `/app/cache` in Docker | Screenshot cache directory. |
+| `SCRAPE_CACHE_DIR` | `/app/cache/scrape` in Docker | Scrape JSON cache directory. |
+| `PUBLIC_BASE_URL` | empty | Optional absolute base URL used to build `imageUrl`. |
+| `CACHE_TTL_SECONDS` | `300` | Default TTL for `/capture` responses. |
+| `SCRAPE_CACHE_TTL_SECONDS` | `300` | Default TTL for `/scrape` responses. |
+| `NAVIGATION_TIMEOUT_MS` | `15000` | Playwright navigation timeout. |
+| `MAX_VIEWPORT_WIDTH` | `1920` | Maximum request width. |
+| `MAX_VIEWPORT_HEIGHT` | `1080` | Maximum request height. |
+| `MAX_TEXT_LENGTH` | `100000` | Maximum extracted text length. |
+| `MAX_HTML_LENGTH` | `100000` | Maximum extracted HTML length. |
+| `MAX_LINKS` | `100` | Maximum links returned per scrape. |
+| `MAX_CONCURRENT_PAGES` | `2` | Maximum in-flight browser pages. |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window duration. |
+| `AUTH_RATE_LIMIT_MAX` | `120` | Allowed requests per window for authorized clients. |
+| `UNAUTH_RATE_LIMIT_MAX` | `30` | Allowed requests per window for unauthorized clients. |
+| `ALLOW_PRIVATE_NETWORKS` | `false` | Whether localhost and private-network targets are allowed. |
+| `URL_ALLOWLIST` | empty | Optional comma-separated hostname allowlist. |
+| `URL_DENYLIST` | empty | Optional comma-separated hostname denylist. |
+
+`ALLOW_PRIVATE_NETWORKS=false` blocks `localhost`, loopback, and private-network targets by default. For public or VPS deployments, keep that default and prefer an explicit `URL_ALLOWLIST`.
+
+`fetchFullPage` is a request-body alias for `fullPage`. It enables full-page capture without raising the global viewport caps defined by `MAX_VIEWPORT_WIDTH` and `MAX_VIEWPORT_HEIGHT`.
+
+If `PUBLIC_BASE_URL` is unset, `imageUrl` stays relative, such as `/image/<key>`. That is the safer default when the service sits behind a reverse proxy.
+
+## Security Model
+
+- Treat Snap Goblin as a backend service, not a browser-facing API.
+- Keep `SNAP_GOBLIN_API_KEY` in server-side environment variables only.
+- Proxy image fetches through your own backend if an end user needs to see a screenshot.
+- Use `URL_ALLOWLIST` whenever you know the small set of hosts the service should reach.
+- Keep `ALLOW_PRIVATE_NETWORKS=false` unless you explicitly need internal network access.
+
+The service also sets conservative response headers and applies simple in-memory rate limiting for both authorized and unauthorized traffic.
+
+## API
 
 ### `GET /health`
 
@@ -79,9 +97,9 @@ Returns:
 
 ### `POST /capture`
 
-Captures a screenshot and returns a stable `imageUrl`.
+Captures a screenshot and returns a stable image reference.
 
-Request:
+Example request:
 
 ```json
 {
@@ -89,7 +107,7 @@ Request:
   "ttlOverrideSeconds": 300,
   "width": 1440,
   "height": 900,
-  "fullPage": true,
+  "fetchFullPage": true,
   "format": "png",
   "quality": 80,
   "waitUntil": "networkidle",
@@ -98,33 +116,49 @@ Request:
 }
 ```
 
+Example response:
+
+```json
+{
+  "key": "8e744fcdbe1e2b5a1bde44bf",
+  "sourceUrl": "https://example.com/",
+  "cached": false,
+  "capturedAt": "2026-03-11T18:26:00.000Z",
+  "expiresAt": "2026-03-11T18:31:00.000Z",
+  "ttlSeconds": 300,
+  "mimeType": "image/png",
+  "imagePath": "/image/8e744fcdbe1e2b5a1bde44bf",
+  "imageUrl": "/image/8e744fcdbe1e2b5a1bde44bf"
+}
+```
+
 ### `POST /refresh`
 
-Same payload as `/capture`, but always re-renders the screenshot and overwrites the cached entry.
+Uses the same payload as `/capture`, but always re-renders the screenshot and overwrites the cached image entry.
 
 ### `POST /scrape`
 
-Flexible JSON-first route for scraping metadata, text, links, optional HTML, and optional screenshot metadata from a single page load.
+Scrapes metadata, rendered text, links, optional HTML, and optional screenshot metadata from a single page load.
 
-Request fields:
+Supported request fields:
 
-- `url` required target URL
-- `ttlOverrideSeconds` optional cache override
-- `width`, `height`, `fullPage`, `format`, `quality` screenshot settings
-- `waitUntil` one of `domcontentloaded`, `load`, `networkidle`
-- `waitForSelector` optional CSS selector to wait for
-- `extraWaitMs` optional extra delay after navigation
-- `includeContent` default `true`
-- `includeMetadata` default `true`
-- `includeLinks` default `false`
-- `includeHtml` default `false`
-- `includeScreenshot` default `false`
-- `maxTextLength`, `maxHtmlLength`, `maxLinks` optional bounded overrides
-- `exportFormat` optional: `default` or `serper`
-- `query` optional source query used in Serper-style exports
-- `engine` optional engine label for Serper-style exports, default `playwright`
+- `url` required target URL.
+- `ttlOverrideSeconds` optional cache override.
+- `width`, `height`, `fetchFullPage`, `fullPage`, `format`, `quality` screenshot settings.
+- `waitUntil` one of `domcontentloaded`, `load`, `networkidle`.
+- `waitForSelector` optional CSS selector to wait for.
+- `extraWaitMs` optional extra delay after navigation, capped at `30000`.
+- `includeContent` default `true`.
+- `includeMetadata` default `true`.
+- `includeLinks` default `false`, except `serper` exports default to `true`.
+- `includeHtml` default `false`.
+- `includeScreenshot` default `false`.
+- `maxTextLength`, `maxHtmlLength`, `maxLinks` optional bounded overrides.
+- `exportFormat` optional: `default` or `serper`.
+- `query` optional source query used in `serper` exports.
+- `engine` optional engine label for `serper` exports, default `playwright`.
 
-JSON-only example:
+Default JSON example:
 
 ```json
 {
@@ -137,7 +171,7 @@ JSON-only example:
 }
 ```
 
-Combined scrape + screenshot example:
+Combined scrape and screenshot example:
 
 ```json
 {
@@ -146,7 +180,7 @@ Combined scrape + screenshot example:
   "includeMetadata": true,
   "includeLinks": false,
   "includeScreenshot": true,
-  "fullPage": true,
+  "fetchFullPage": true,
   "width": 1440,
   "height": 900,
   "waitUntil": "networkidle",
@@ -154,21 +188,7 @@ Combined scrape + screenshot example:
 }
 ```
 
-Serper-style export example:
-
-```json
-{
-  "url": "https://www.apple.com",
-  "exportFormat": "serper",
-  "query": "apple inc",
-  "engine": "google",
-  "includeContent": true,
-  "includeMetadata": true,
-  "includeLinks": true
-}
-```
-
-Example response:
+Default response shape:
 
 ```json
 {
@@ -194,7 +214,8 @@ Example response:
     "includeScreenshot": true,
     "maxTextLength": 25000,
     "maxHtmlLength": 100000,
-    "maxLinks": 25
+    "maxLinks": 25,
+    "exportFormat": "default"
   },
   "page": {
     "requestedUrl": "https://example.com/",
@@ -203,6 +224,8 @@ Example response:
     "description": null,
     "ogTitle": null,
     "ogDescription": null,
+    "ogImage": null,
+    "siteName": null,
     "canonicalUrl": null,
     "lang": "en"
   },
@@ -218,14 +241,15 @@ Example response:
       "href": "https://www.iana.org/domains/example",
       "text": "More information...",
       "rel": null,
-      "target": null
+      "target": null,
+      "title": null
     }
   ],
   "screenshot": {
     "key": "8e744fcdbe1e2b5a1bde44bf",
     "mimeType": "image/png",
     "imagePath": "/image/8e744fcdbe1e2b5a1bde44bf",
-    "imageUrl": "http://localhost:4000/image/8e744fcdbe1e2b5a1bde44bf"
+    "imageUrl": "/image/8e744fcdbe1e2b5a1bde44bf"
   },
   "timings": {
     "navigationMs": 1043,
@@ -235,7 +259,21 @@ Example response:
 }
 ```
 
-When `exportFormat` is set to `serper`, `/scrape` returns a Serper-inspired response shape:
+Serper-style example:
+
+```json
+{
+  "url": "https://www.apple.com",
+  "exportFormat": "serper",
+  "query": "apple inc",
+  "engine": "google",
+  "includeContent": true,
+  "includeMetadata": true,
+  "includeLinks": true
+}
+```
+
+Serper-style response shape:
 
 ```json
 {
@@ -248,7 +286,7 @@ When `exportFormat` is set to `serper`, `/scrape` returns a Serper-inspired resp
     "title": "Apple",
     "imageUrl": "https://www.apple.com/example-og-image.jpg",
     "description": "Apple Inc. is an American multinational technology company...",
-    "descriptionSource": "Apple",
+    "descriptionSource": "Website",
     "descriptionLink": "https://www.apple.com/",
     "attributes": {
       "URL": "https://www.apple.com/",
@@ -271,6 +309,14 @@ When `exportFormat` is set to `serper`, `/scrape` returns a Serper-inspired resp
       "position": 1
     }
   ],
+  "peopleAlsoAsk": [
+    {
+      "question": "What is Apple?",
+      "snippet": "Apple Inc. is an American multinational technology company...",
+      "title": "Apple",
+      "link": "https://www.apple.com/"
+    }
+  ],
   "relatedSearches": [
     {
       "query": "Mac"
@@ -282,14 +328,14 @@ When `exportFormat` is set to `serper`, `/scrape` returns a Serper-inspired resp
 
 ### `GET /image/:key`
 
-Returns the stored screenshot bytes for any key returned by `/capture`, `/refresh`, or `/scrape` when `includeScreenshot` is enabled.
+Returns the stored screenshot bytes for any key returned by `/capture`, `/refresh`, or `/scrape` when `includeScreenshot` is enabled. This route is protected and requires the same `x-api-key` header as the JSON endpoints.
 
-## Next.js example
+## Integration Example
 
-Use this from a server action, route handler, or any server-only utility:
+Use this from a route handler, server action, worker, or any other server-only code:
 
 ```ts
-const response = await fetch("http://scraper:4000/scrape", {
+const response = await fetch("http://snap_goblin:4000/scrape", {
   method: "POST",
   headers: {
     "content-type": "application/json",
@@ -313,21 +359,32 @@ if (!response.ok) {
 const data = await response.json();
 ```
 
-## Operational notes
+The more detailed integration notes live in [`AI_AGENT_INTEGRATION_GUIDE.md`](./AI_AGENT_INTEGRATION_GUIDE.md).
 
-- `networkidle` works well for many pages, but long-polling or ad-heavy sites may need `waitForSelector` or `extraWaitMs`.
-- Keep `URL_ALLOWLIST` populated in production when possible.
-- Returning rendered HTML is optional and bounded because it can get large quickly.
-- The service currently favors deterministic extraction over AI-generated formatting.
-
-## OpenAI follow-up
-
-This version does not call OpenAI yet. The intended next step is to keep `/scrape` deterministic and add an optional `ai` field later when `OPENAI_API_KEY` is configured, so your chat app can choose between raw structured scrape data and enriched summaries/classifications.
-
-## Quick test
+## Development
 
 ```bash
-curl -sS -X POST "http://localhost:4000/scrape" \
+npm ci
+npm run typecheck
+npm run build
+docker build -t snap_goblin .
+```
+
+## Operational Notes
+
+- `networkidle` works well for many pages, but long-polling or ad-heavy sites often need `waitForSelector` or `extraWaitMs`.
+- Returning rendered HTML is optional and bounded because it can get large quickly.
+- The service prefers deterministic extraction over AI-generated post-processing.
+- If you set `PUBLIC_BASE_URL`, point it at the real HTTPS origin for the service.
+
+## Contributing
+
+Public contributions are welcome. Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) for local setup, validation commands, and PR expectations.
+
+## Quick Test
+
+```bash
+curl -sS -X POST "http://localhost:4010/scrape" \
   -H "content-type: application/json" \
   -H "x-api-key: replace-with-strong-api-key" \
   -d "{\"url\":\"https://example.com\",\"includeContent\":true,\"includeMetadata\":true,\"includeScreenshot\":true}"

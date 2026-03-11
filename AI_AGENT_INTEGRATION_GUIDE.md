@@ -1,6 +1,6 @@
-# AI Agent Integration Guide
+# Snap Goblin AI Integration Guide
 
-Use this guide to integrate the `snap_goblin` scraper service into another project.
+Use this guide to integrate the `snap_goblin` service into another project.
 
 The goal is to let another app send a URL to this service and receive structured page data that is useful for an AI agent:
 
@@ -10,6 +10,8 @@ The goal is to let another app send a URL to this service and receive structured
 - optional screenshot metadata
 
 This service is intended for server-to-server use. Do not expose the API key in browser code.
+Protected routes, including image retrieval, require the same `x-api-key`.
+`GET /health` is the only public route.
 
 ## Service Summary
 
@@ -61,8 +63,14 @@ The scraper service itself must be started with:
 SNAP_GOBLIN_API_KEY=replace-with-strong-api-key
 HOST_PORT=4010
 PORT=4000
+PUBLIC_BASE_URL=https://snap-goblin.example.com
+RATE_LIMIT_WINDOW_MS=60000
+AUTH_RATE_LIMIT_MAX=120
+UNAUTH_RATE_LIMIT_MAX=30
 MAX_TEXT_LENGTH=100000
 ```
+
+Use a long random API key generated outside the repo, keep it in server-side env vars only, and rotate it if you suspect it has been exposed.
 
 ## Recommended Architecture
 
@@ -106,11 +114,17 @@ Recommended request body for AI ingestion:
   "includeLinks": true,
   "includeHtml": false,
   "includeScreenshot": false,
+  "fetchFullPage": false,
   "waitUntil": "networkidle",
   "maxTextLength": 100000,
   "maxLinks": 50
 }
 ```
+
+`fetchFullPage` is a request-body alias for `fullPage`. It enables full-page capture behavior on `/capture`, `/refresh`, and screenshot-enabled `/scrape` requests without changing the service-wide `MAX_VIEWPORT_WIDTH` and `MAX_VIEWPORT_HEIGHT` limits.
+
+If you request screenshots, the response includes `imagePath` and `imageUrl`. Treat both as protected resources. Your backend must send `x-api-key` again when fetching `GET /image/:key`.
+If `PUBLIC_BASE_URL` is not set on the scraper service, `imageUrl` will stay relative so downstream apps do not accidentally trust forwarded host headers.
 
 Recommended high-value fields from the response when using the default export:
 
@@ -152,6 +166,8 @@ Typical response:
     "description": null,
     "ogTitle": null,
     "ogDescription": null,
+    "ogImage": null,
+    "siteName": null,
     "canonicalUrl": null,
     "lang": "en"
   },
@@ -167,7 +183,8 @@ Typical response:
       "href": "https://example.com/about",
       "text": "About",
       "rel": null,
-      "target": null
+      "target": null,
+      "title": null
     }
   ],
   "screenshot": null,
@@ -233,6 +250,8 @@ type ScrapeResult = {
     description: string | null;
     ogTitle: string | null;
     ogDescription: string | null;
+    ogImage: string | null;
+    siteName: string | null;
     canonicalUrl: string | null;
     lang: string | null;
   } | null;
@@ -248,6 +267,7 @@ type ScrapeResult = {
     text: string;
     rel: string | null;
     target: string | null;
+    title: string | null;
   }> | null;
   timings: {
     navigationMs: number;
@@ -283,6 +303,26 @@ export async function scrapePageForAi(url: string): Promise<ScrapeResult> {
   }
 
   return response.json();
+}
+```
+
+If your integration needs screenshots, fetch the image through backend code instead of exposing the scraper URL directly to the browser:
+
+```ts
+export async function fetchProtectedScreenshot(imagePath: string): Promise<ArrayBuffer> {
+  const response = await fetch(`${process.env.SCRAPER_BASE_URL}${imagePath}`, {
+    headers: {
+      "x-api-key": process.env.SCRAPER_API_KEY!
+    },
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Image fetch failed: ${response.status} ${body}`);
+  }
+
+  return response.arrayBuffer();
 }
 ```
 
@@ -329,6 +369,8 @@ export function toAiPageContext(scrape: any) {
 
 - Only call the scraper from backend code.
 - Keep the API key in server env vars only.
+- Treat `GET /image/:key` as protected API access, not as a public static file.
+- Proxy screenshot delivery through your own backend if an end user needs to view it.
 - Pass `waitForSelector` for pages that render important content late.
 - Use `includeLinks: true` when the AI agent needs navigation context.
 - Use `includeHtml: false` unless you specifically need DOM markup.
@@ -342,6 +384,7 @@ The integrating app should handle:
 
 - `401` invalid or missing API key
 - `400` invalid request body or blocked URL
+- `429` rate-limited client
 - request timeout / network error
 - empty content on JS-heavy or blocked pages
 
@@ -359,11 +402,12 @@ If you want to hand this off to another AI agent, give it this checklist:
 1. Add `SCRAPER_BASE_URL` and `SCRAPER_API_KEY` env vars to the target project.
 2. Create a server-only scraper client module.
 3. Implement a `scrapePageForAi(url)` function that calls `POST /scrape`.
-4. Add a mapper that converts scraper output into a compact AI-ready context object.
-5. Replace any old direct page-fetch logic with this scraper-backed flow where appropriate.
-6. Ensure no browser/client code ever references `SCRAPER_API_KEY`.
-7. Add basic logging and error handling around scraper failures.
-8. Add one test or one integration path that verifies a successful scrape call.
+4. If screenshots are needed, fetch `GET /image/:key` from backend code with `x-api-key`.
+5. Add a mapper that converts scraper output into a compact AI-ready context object.
+6. Replace any old direct page-fetch logic with this scraper-backed flow where appropriate.
+7. Ensure no browser/client code ever references `SCRAPER_API_KEY`.
+8. Add basic logging and error handling around scraper failures.
+9. Add one test or one integration path that verifies a successful scrape call.
 
 ## Copy/Paste Prompt For Another AI Agent
 
@@ -374,6 +418,7 @@ Requirements:
 - Use server-side code only.
 - Read SCRAPER_BASE_URL and SCRAPER_API_KEY from environment variables.
 - Create a reusable helper that calls POST {SCRAPER_BASE_URL}/scrape with x-api-key.
+- If screenshots are used, fetch GET {SCRAPER_BASE_URL}/image/:key from backend code with x-api-key.
 - Request includeContent=true, includeMetadata=true, includeLinks=true, includeHtml=false, includeScreenshot=false.
 - Use waitUntil=networkidle and maxTextLength=100000 by default.
 - Return a normalized AI-friendly object with title, description, headings, main text, links, and final URL.
@@ -401,3 +446,5 @@ curl -sS -X POST "http://localhost:4010/scrape" ^
 ```
 
 If that returns JSON with `content.text`, the service is ready to integrate.
+
+If you enable `PUBLIC_BASE_URL`, make sure it points at your real HTTPS origin. Otherwise, `imageUrl` will stay as a relative path so consuming apps do not accidentally trust spoofable forwarded headers.

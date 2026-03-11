@@ -5,6 +5,7 @@ export interface RuntimeConfig {
   port: number;
   cacheDir: string;
   scrapeCacheDir: string;
+  publicBaseUrl: string | null;
   cacheTtlSeconds: number;
   scrapeCacheTtlSeconds: number;
   navigationTimeoutMs: number;
@@ -14,6 +15,9 @@ export interface RuntimeConfig {
   maxHtmlLength: number;
   maxLinks: number;
   maxConcurrentPages: number;
+  rateLimitWindowMs: number;
+  authRateLimitMax: number;
+  unauthRateLimitMax: number;
   allowPrivateNetworks: boolean;
   urlAllowlist: Set<string>;
   urlDenylist: Set<string>;
@@ -28,6 +32,9 @@ const DEFAULT_MAX_TEXT_LENGTH = 100_000;
 const DEFAULT_MAX_HTML_LENGTH = 100_000;
 const DEFAULT_MAX_LINKS = 100;
 const DEFAULT_MAX_CONCURRENT_PAGES = 2;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_AUTH_RATE_LIMIT_MAX = 120;
+const DEFAULT_UNAUTH_RATE_LIMIT_MAX = 30;
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -40,6 +47,28 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
   }
 
   return parsed;
+}
+
+function parseOptionalBaseUrl(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const parsed = new URL(trimmed);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("PUBLIC_BASE_URL must use http or https.");
+  }
+
+  parsed.hash = "";
+  parsed.search = "";
+
+  const normalized = parsed.toString();
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
 }
 
 function parseCsvSet(raw: string | undefined): Set<string> {
@@ -90,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     port: parsePositiveInt(env.PORT, DEFAULT_PORT),
     cacheDir,
     scrapeCacheDir,
+    publicBaseUrl: parseOptionalBaseUrl(env.PUBLIC_BASE_URL),
     cacheTtlSeconds: parsePositiveInt(env.CACHE_TTL_SECONDS, DEFAULT_CACHE_TTL_SECONDS),
     scrapeCacheTtlSeconds: parsePositiveInt(
       env.SCRAPE_CACHE_TTL_SECONDS,
@@ -107,6 +137,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): RuntimeConfig 
     maxConcurrentPages: parsePositiveInt(
       env.MAX_CONCURRENT_PAGES,
       DEFAULT_MAX_CONCURRENT_PAGES
+    ),
+    rateLimitWindowMs: parsePositiveInt(env.RATE_LIMIT_WINDOW_MS, DEFAULT_RATE_LIMIT_WINDOW_MS),
+    authRateLimitMax: parsePositiveInt(env.AUTH_RATE_LIMIT_MAX, DEFAULT_AUTH_RATE_LIMIT_MAX),
+    unauthRateLimitMax: parsePositiveInt(
+      env.UNAUTH_RATE_LIMIT_MAX,
+      DEFAULT_UNAUTH_RATE_LIMIT_MAX
     ),
     allowPrivateNetworks: parseBoolean(env.ALLOW_PRIVATE_NETWORKS, false),
     urlAllowlist: parseCsvSet(env.URL_ALLOWLIST),
