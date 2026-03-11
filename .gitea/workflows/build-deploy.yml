@@ -65,7 +65,7 @@ jobs:
           echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USERNAME" --password-stdin
 
       - name: Push Docker image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.REGISTRY_USERNAME != '' && secrets.REGISTRY_PASSWORD != ''
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           IMAGE_TAG="${GITHUB_SHA::12}"
           docker tag "$LOCAL_IMAGE" "$REGISTRY_HOST/$IMAGE_NAME:latest"
