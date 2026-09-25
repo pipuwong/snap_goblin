@@ -26,7 +26,9 @@ import {
   createSnapshotKey,
   normalizeTargetUrl,
   parseWaitUntil,
-  parseViewportDimension
+  parseViewportDimension,
+  resolveTargetAddress,
+  type ResolvedTargetAddress
 } from "./url-policy.js";
 
 const VALID_FORMATS = new Set<ImageFormat>(["png", "jpeg"]);
@@ -118,7 +120,7 @@ type CaptureFn = (options: {
   waitUntil?: NavigationWaitUntil;
   waitForSelector?: string | null;
   extraWaitMs?: number;
-  validateUrl?: (url: string) => Promise<void>;
+  resolveAddress: (url: string) => Promise<ResolvedTargetAddress>;
 }) => Promise<CapturedImageResult>;
 
 type ScrapeFn = (options: {
@@ -140,7 +142,7 @@ type ScrapeFn = (options: {
   maxTextLength: number;
   maxHtmlLength: number;
   maxLinks: number;
-  validateUrl?: (url: string) => Promise<void>;
+  resolveAddress: (url: string) => Promise<ResolvedTargetAddress>;
 }) => Promise<{
   page: ScrapedPageResult["page"];
   content: ScrapedPageResult["content"];
@@ -547,10 +549,6 @@ async function validateSourceUrl(value: string, config: RuntimeConfig): Promise<
   return normalized;
 }
 
-async function validateLoadedUrl(url: string, config: RuntimeConfig): Promise<void> {
-  await assertTargetUrlAllowed(normalizeTargetUrl(url), config);
-}
-
 function parseCaptureInput(
   body: Partial<CaptureRequestPayload> | undefined,
   config: RuntimeConfig
@@ -660,7 +658,7 @@ async function captureAndCache(options: {
     waitUntil: options.captureInput.waitUntil,
     waitForSelector: options.captureInput.waitForSelector,
     extraWaitMs: options.captureInput.extraWaitMs,
-    validateUrl: async (loadedUrl) => validateLoadedUrl(loadedUrl, options.config)
+    resolveAddress: (url) => resolveTargetAddress(url, options.config)
   });
 
   const saved = await options.cache.save({
@@ -867,7 +865,7 @@ export function createApp(options: CreateAppOptions) {
         maxTextLength: parsed.options.maxTextLength,
         maxHtmlLength: parsed.options.maxHtmlLength,
         maxLinks: parsed.options.maxLinks,
-        validateUrl: async (loadedUrl) => validateLoadedUrl(loadedUrl, options.config)
+        resolveAddress: (url) => resolveTargetAddress(url, options.config)
       });
 
       let screenshot: ScrapeScreenshotRef | null = null;

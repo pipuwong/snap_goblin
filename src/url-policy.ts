@@ -10,73 +10,41 @@ export function normalizeTargetUrl(value: string): string {
   if (!["http:", "https:"].includes(parsed.protocol)) {
     throw new Error("Only http and https URLs are supported.");
   }
+  if (parsed.username || parsed.password) {
+    throw new Error("URLs with credentials are not supported.");
+  }
 
   parsed.hash = "";
   return parsed.toString();
 }
 
-function isPrivateIpv4(ip: string): boolean {
-  const parts = ip.split(".").map((part) => Number.parseInt(part, 10));
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return false;
-  }
-
-  const [a, b] = parts;
-  return (
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    a === 169 && b === 254 ||
-    a === 172 && b >= 16 && b <= 31 ||
-    a === 192 && b === 168 ||
-    a === 0 ||
-    (a === 198 && (b === 18 || b === 19))
-  );
+const blockedAddresses = new net.BlockList();
+for (const [address, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10],
+  ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
+  ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.168.0.0", 16],
+  ["198.18.0.0", 15], ["198.51.100.0", 24], ["203.0.113.0", 24],
+  ["224.0.0.0", 4], ["240.0.0.0", 4]
+] as const) {
+  blockedAddresses.addSubnet(address, prefix, "ipv4");
 }
-
-function isPrivateIpv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
-  return (
-    normalized === "::1" ||
-    normalized === "::" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    normalized.startsWith("fe8") ||
-    normalized.startsWith("fe9") ||
-    normalized.startsWith("fea") ||
-    normalized.startsWith("feb")
-  );
+for (const [address, prefix] of [
+  ["::", 128], ["::1", 128], ["fc00::", 7],
+  ["fe80::", 10], ["fec0::", 10], ["ff00::", 8], ["2001:db8::", 32]
+] as const) {
+  blockedAddresses.addSubnet(address, prefix, "ipv6");
 }
 
 function isPrivateAddress(address: string): boolean {
-  if (net.isIPv4(address)) {
-    return isPrivateIpv4(address);
-  }
-
-  if (net.isIPv6(address)) {
-    return isPrivateIpv6(address);
-  }
-
-  return false;
+  const family = net.isIP(address);
+  return family === 0 || blockedAddresses.check(address, family === 4 ? "ipv4" : "ipv6");
 }
 
-async function assertHostnameResolvesPublic(hostname: string): Promise<void> {
-  const resolved = await dns.lookup(hostname, { all: true, verbatim: true });
-  if (resolved.length === 0) {
-    throw new Error(`Hostname ${hostname} did not resolve to any address.`);
-  }
+export type ResolvedTargetAddress = { address: string; family: 4 | 6 };
 
-  const blocked = resolved.find((entry) => isPrivateAddress(entry.address));
-  if (blocked) {
-    throw new Error(`Hostname ${hostname} resolves to a private or loopback address.`);
-  }
-}
-
-export async function assertTargetUrlAllowed(
-  url: string,
-  config: RuntimeConfig
-): Promise<void> {
-  const hostname = new URL(url).hostname.toLowerCase();
+export async function resolveTargetAddress(url: string, config: RuntimeConfig): Promise<ResolvedTargetAddress> {
+  const parsed = new URL(normalizeTargetUrl(url));
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
 
   if (config.urlDenylist.has(hostname)) {
     throw new Error(`Hostname ${hostname} is denied by policy.`);
@@ -86,19 +54,38 @@ export async function assertTargetUrlAllowed(
     throw new Error(`Hostname ${hostname} is not in URL_ALLOWLIST.`);
   }
 
-  if (config.allowPrivateNetworks) {
-    return;
+  if (!config.allowPrivateNetworks) {
+    if (parsed.port !== "") {
+      throw new Error("Only standard HTTP and HTTPS ports are allowed.");
+    }
+    if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+      throw new Error(`Hostname ${hostname} is not allowed.`);
+    }
+    if (net.isIP(hostname) !== 0 && isPrivateAddress(hostname)) {
+      throw new Error(`Hostname ${hostname} is not allowed.`);
+    }
   }
 
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
-    throw new Error(`Hostname ${hostname} is not allowed.`);
+  const resolved = await dns.lookup(hostname, { all: true, verbatim: true });
+  if (resolved.length === 0) {
+    throw new Error(`Hostname ${hostname} did not resolve to any address.`);
   }
 
-  if (isPrivateAddress(hostname)) {
-    throw new Error(`Hostname ${hostname} is not allowed.`);
+  if (!config.allowPrivateNetworks && resolved.some((entry) => isPrivateAddress(entry.address))) {
+    throw new Error(`Hostname ${hostname} resolves to a private or loopback address.`);
   }
+  const first = resolved[0];
+  if (!first || (first.family !== 4 && first.family !== 6)) {
+    throw new Error(`Hostname ${hostname} did not resolve to an IP address.`);
+  }
+  return { address: first.address, family: first.family };
+}
 
-  await assertHostnameResolvesPublic(hostname);
+export async function assertTargetUrlAllowed(
+  url: string,
+  config: RuntimeConfig
+): Promise<void> {
+  await resolveTargetAddress(url, config);
 }
 
 export function createSnapshotKey(options: {

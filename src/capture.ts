@@ -1,5 +1,7 @@
-import type { Browser, Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { chromium } from "playwright";
+import { startSafeEgressProxy } from "./safe-egress-proxy.js";
+import type { ResolvedTargetAddress } from "./url-policy.js";
 import type {
   CapturedImageResult,
   ImageFormat,
@@ -21,7 +23,14 @@ const waitingResolvers: Array<() => void> = [];
 
 async function getBrowser(): Promise<Browser> {
   if (!browserPromise) {
-    browserPromise = chromium.launch({ headless: true });
+    browserPromise = chromium.launch({
+      headless: true,
+      args: [
+        "--proxy-bypass-list=<-loopback>",
+        "--disable-quic",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+      ]
+    });
   }
 
   return browserPromise;
@@ -59,7 +68,7 @@ async function waitForPageReady(
     waitUntil: NavigationWaitUntil;
     waitForSelector: string | null;
     extraWaitMs: number;
-    validateUrl?: (url: string) => Promise<void>;
+    resolveAddress: (url: string) => Promise<ResolvedTargetAddress>;
   }
 ): Promise<void> {
   await page.goto(options.url, {
@@ -67,9 +76,7 @@ async function waitForPageReady(
     waitUntil: options.waitUntil
   });
 
-  if (options.validateUrl) {
-    await options.validateUrl(page.url());
-  }
+  await options.resolveAddress(page.url());
 
   if (options.waitForSelector) {
     await page.waitForSelector(options.waitForSelector, {
@@ -90,16 +97,21 @@ async function withLoadedPage<T>(options: {
   waitUntil: NavigationWaitUntil;
   waitForSelector: string | null;
   extraWaitMs: number;
-  validateUrl?: (url: string) => Promise<void>;
+  resolveAddress: (url: string) => Promise<ResolvedTargetAddress>;
   run: (page: Page) => Promise<T>;
 }): Promise<T> {
   await acquirePageSlot();
-  const browser = await getBrowser();
-  const context = await browser.newContext({
-    viewport: { width: options.width, height: options.height }
-  });
-
+  let context: BrowserContext | null = null;
+  let proxy: Awaited<ReturnType<typeof startSafeEgressProxy>> | null = null;
   try {
+    proxy = await startSafeEgressProxy(options.resolveAddress);
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      viewport: { width: options.width, height: options.height },
+      proxy: { server: proxy.url },
+      serviceWorkers: "block",
+      acceptDownloads: false
+    });
     const page = await context.newPage();
     await waitForPageReady(page, {
       url: options.url,
@@ -107,13 +119,20 @@ async function withLoadedPage<T>(options: {
       waitUntil: options.waitUntil,
       waitForSelector: options.waitForSelector,
       extraWaitMs: options.extraWaitMs,
-      validateUrl: options.validateUrl
+      resolveAddress: options.resolveAddress
     });
 
     return await options.run(page);
   } finally {
-    await context.close();
-    releasePageSlot();
+    try {
+      await context?.close();
+    } finally {
+      try {
+        await proxy?.close();
+      } finally {
+        releasePageSlot();
+      }
+    }
   }
 }
 
@@ -128,7 +147,7 @@ export async function captureWebsite(options: {
   waitUntil?: NavigationWaitUntil;
   waitForSelector?: string | null;
   extraWaitMs?: number;
-  validateUrl?: (url: string) => Promise<void>;
+  resolveAddress: (url: string) => Promise<ResolvedTargetAddress>;
 }): Promise<CapturedImageResult> {
   return withLoadedPage({
     url: options.url,
@@ -138,7 +157,7 @@ export async function captureWebsite(options: {
     waitUntil: options.waitUntil ?? "networkidle",
     waitForSelector: options.waitForSelector ?? null,
     extraWaitMs: options.extraWaitMs ?? 0,
-    validateUrl: options.validateUrl,
+    resolveAddress: options.resolveAddress,
     run: async (page) => {
       const buffer = await page.screenshot({
         type: options.format,
@@ -191,7 +210,7 @@ export async function scrapeWebsite(options: {
   maxTextLength: number;
   maxHtmlLength: number;
   maxLinks: number;
-  validateUrl?: (url: string) => Promise<void>;
+  resolveAddress: (url: string) => Promise<ResolvedTargetAddress>;
 }): Promise<{
   page: ScrapedPageMeta | null;
   content: ScrapedPageResult["content"];
@@ -210,7 +229,7 @@ export async function scrapeWebsite(options: {
     waitUntil: options.waitUntil,
     waitForSelector: options.waitForSelector,
     extraWaitMs: options.extraWaitMs,
-    validateUrl: options.validateUrl,
+    resolveAddress: options.resolveAddress,
     run: async (page) => {
       const navigationMs = Date.now() - startedAt;
       const extractionStartedAt = Date.now();
