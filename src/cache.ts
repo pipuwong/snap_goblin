@@ -18,6 +18,19 @@ interface JsonCacheIndex {
   entries: Record<string, ScrapeCacheMeta>;
 }
 
+export interface SnapshotCache {
+  getMeta(key: string): Promise<Pick<SnapshotMeta, "contentType" | "capturedAt"> | null>;
+  getImage(key: string): Promise<{ meta: Pick<SnapshotMeta, "contentType" | "etag">; buffer: Buffer } | null>;
+  isFresh(meta: { capturedAt: number }, ttlSeconds: number, now?: number): boolean;
+  save(options: { key: string; sourceUrl: string; format: ImageFormat; contentType: string; buffer: Buffer; capturedAt: number }): Promise<Pick<SnapshotMeta, "key" | "contentType" | "capturedAt">>;
+}
+
+export interface ScrapeCache {
+  get(key: string): Promise<{ meta: Pick<ScrapeCacheMeta, "capturedAt">; payload: ScrapedPageResult } | null>;
+  isFresh(meta: { capturedAt: number }, ttlSeconds: number, now?: number): boolean;
+  save(options: { key: string; sourceUrl: string; payload: ScrapedPageResult; capturedAt: number }): Promise<Pick<ScrapeCacheMeta, "capturedAt">>;
+}
+
 export class DiskSnapshotCache {
   private readonly indexPath: string;
   private readonly entries = new Map<string, SnapshotMeta>();
@@ -63,7 +76,7 @@ export class DiskSnapshotCache {
     }
   }
 
-  isFresh(meta: SnapshotMeta, ttlSeconds: number, now = Date.now()): boolean {
+  isFresh(meta: { capturedAt: number }, ttlSeconds: number, now = Date.now()): boolean {
     return now - meta.capturedAt < ttlSeconds * 1000;
   }
 
@@ -181,7 +194,7 @@ export class DiskScrapeCache {
     }
   }
 
-  isFresh(meta: ScrapeCacheMeta, ttlSeconds: number, now = Date.now()): boolean {
+  isFresh(meta: { capturedAt: number }, ttlSeconds: number, now = Date.now()): boolean {
     return now - meta.capturedAt < ttlSeconds * 1000;
   }
 

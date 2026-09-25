@@ -1,15 +1,29 @@
 import http from "node:http";
 import { createApp } from "./app.js";
-import { DiskScrapeCache, DiskSnapshotCache } from "./cache.js";
+import { BlobScrapeCache, BlobSnapshotCache } from "./blob-cache.js";
+import { DiskScrapeCache, DiskSnapshotCache, type ScrapeCache, type SnapshotCache } from "./cache.js";
 import { loadConfig } from "./config.js";
 import { closeCaptureBrowser, configureCaptureConcurrency } from "./capture.js";
 
 async function startServer(): Promise<http.Server> {
   const config = loadConfig();
-  const cache = new DiskSnapshotCache(config.cacheDir);
-  const scrapeCache = new DiskScrapeCache(config.scrapeCacheDir);
-  await cache.init();
-  await scrapeCache.init();
+  const useBlob = process.env.SNAP_GOBLIN_STORAGE === "blob";
+  if (useBlob && !process.env.BLOB_READ_WRITE_TOKEN) {
+    throw new Error("BLOB_READ_WRITE_TOKEN is required for Blob storage.");
+  }
+  let cache: SnapshotCache;
+  let scrapeCache: ScrapeCache;
+  if (useBlob) {
+    cache = new BlobSnapshotCache();
+    scrapeCache = new BlobScrapeCache();
+  } else {
+    const diskCache = new DiskSnapshotCache(config.cacheDir);
+    const diskScrapeCache = new DiskScrapeCache(config.scrapeCacheDir);
+    await diskCache.init();
+    await diskScrapeCache.init();
+    cache = diskCache;
+    scrapeCache = diskScrapeCache;
+  }
   configureCaptureConcurrency(config.maxConcurrentPages);
 
   const app = createApp({ config, cache, scrapeCache });

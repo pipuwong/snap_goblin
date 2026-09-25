@@ -30,6 +30,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "express": "^5.1.0",
     "playwright": "^1.58.2"
   },

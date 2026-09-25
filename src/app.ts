@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
-import { DiskScrapeCache, DiskSnapshotCache } from "./cache.js";
+import type { ScrapeCache, SnapshotCache } from "./cache.js";
 import type { RuntimeConfig } from "./config.js";
 import { captureWebsite, scrapeWebsite } from "./capture.js";
 import type {
@@ -152,8 +152,8 @@ type ScrapeFn = (options: {
 
 export interface CreateAppOptions {
   config: RuntimeConfig;
-  cache: DiskSnapshotCache;
-  scrapeCache: DiskScrapeCache;
+  cache: SnapshotCache;
+  scrapeCache: ScrapeCache;
   captureFn?: CaptureFn;
   scrapeFn?: ScrapeFn;
 }
@@ -637,7 +637,7 @@ async function captureAndCache(options: {
   sourceUrl: string;
   captureInput: ReturnType<typeof parseCaptureInput>;
   config: RuntimeConfig;
-  cache: DiskSnapshotCache;
+  cache: SnapshotCache;
   captureFn: CaptureFn;
 }): Promise<{ key: string; capturedAtMs: number; mimeType: string }> {
   const key = createSnapshotKey({
